@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moppo-rl"
+version = "0.1.0"
+description = "Multi-objective PPO playground with interactive web UI"
+readme = "README.md"
+authors = [{name = "Your Name"}]
+requires-python = ">=3.10"
+dependencies = [
+  "gymnasium[mujoco]>=0.29",
+  "numpy>=1.24",
+  "torch>=2.1",
+  "tyro>=0.5",
+  "tqdm>=4.66",
+  "rich>=13.7",
+  "imageio>=2.31",
+  "imageio-ffmpeg>=0.4",
+  "matplotlib>=3.8"
+]
+
+[project.optional-dependencies]
+web = [
+  "gradio>=4.31",
+  "fastapi>=0.110",
+  "uvicorn>=0.29"
+]
+
+[tool.setuptools.packages.find]
+where = ["moppo_rl"]
