@@ -19,7 +19,6 @@ dirichlet_alpha: 1.0
 weight_strategy: dirichlet
 seed: 7
 device: cpu
-checkpoint_path: checkpoints/latest-moppo.pt
 eval_interval: 10
 eval_episodes: 2
 eval_weights:
