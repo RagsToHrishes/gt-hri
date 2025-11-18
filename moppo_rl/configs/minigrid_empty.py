@@ -54,7 +54,7 @@ def _directional_preference(obs, info, axis: str, positive: bool) -> float:
 
 def _make_cardinal_component(name: str, axis: str, positive: bool, description: str) -> RewardComponent:
     def fn(_obs, _action, reward, _terminated, _truncated, info) -> float:
-        bias = CARDINAL_PREFERENCE_WEIGHT * _directional_preference(_obs, info, axis, positive)
+        bias = reward * CARDINAL_PREFERENCE_WEIGHT * _directional_preference(_obs, info, axis, positive)
         return float(reward + bias)
 
     return RewardComponent(name=name, fn=fn, description=description)

@@ -54,7 +54,7 @@ class TrainConfig:
     gae_lambda: float = 0.95
     clip_coef: float = 0.2
     update_epochs: int = 10
-    minibatch_size: int = 8168
+    minibatch_size: int = 4192
     entropy_coef: float = 0.01
     value_coef: float = 1.0
     max_grad_norm: float = 0.5
@@ -248,17 +248,38 @@ def run_evaluation(
     return avg_return, recorded_video, len(returns), weight_logs
 
 
+def _save_checkpoint(
+    agent: MOPPOAgent,
+    reward_config: RewardConfig,
+    args: TrainConfig,
+    checkpoint_path: Path,
+    reason: Optional[str] = None,
+) -> None:
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint = agent.to_checkpoint()
+    checkpoint.update(
+        {
+            "env_id": args.env_id,
+            "reward_names": reward_config.names,
+            "reward_config_path": args.reward_config,
+        }
+    )
+    torch.save(checkpoint, checkpoint_path)
+    reason_suffix = f" ({reason})" if reason else ""
+    console.print(f"[bold blue]Saved checkpoint{reason_suffix} to {checkpoint_path}[/bold blue]")
+
+
 def train(args: TrainConfig) -> None:
     workspace_dir = _get_workspace_dir()
-    resolved_reward_config = _resolve_path(args.reward_config, workspace_dir)
-    resolved_checkpoint_path = _resolve_path(args.checkpoint_path, workspace_dir)
-    resolved_eval_render_dir = _resolve_path(args.eval_render_dir, workspace_dir)
+    reward_config_path = _resolve_path(args.reward_config, workspace_dir)
+    checkpoint_path = _resolve_path(args.checkpoint_path, workspace_dir)
+    eval_render_dir = _resolve_path(args.eval_render_dir, workspace_dir)
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
     reward_config = load_reward_config(
-        resolved_reward_config.as_posix() if resolved_reward_config is not None else None,
+        reward_config_path.as_posix() if reward_config_path is not None else None,
         args.env_id,
     )
     env = make_vectorized_env(
@@ -293,7 +314,7 @@ def train(args: TrainConfig) -> None:
     eval_weights, eval_weight_sampler = resolve_eval_weights(
         args, reward_config.reward_dim, torch.device(args.device)
     )
-    eval_video_root = resolved_eval_render_dir
+    eval_video_root = eval_render_dir
     eval_render_mode = args.eval_render_mode
     if eval_render_mode == "none" and eval_video_root is not None:
         eval_render_mode = "video"
@@ -395,6 +416,14 @@ def train(args: TrainConfig) -> None:
                 )
             if eval_video_path is not None:
                 console.print(f"[cyan]Saved evaluation video to {eval_video_path}[/cyan]")
+            if checkpoint_path is not None:
+                _save_checkpoint(
+                    agent=agent,
+                    reward_config=reward_config,
+                    args=args,
+                    checkpoint_path=checkpoint_path,
+                    reason=f"after evaluation update {update + 1}",
+                )
 
         table = Table(title=f"Update {update + 1}/{num_updates}")
         table.add_column("Metric")
@@ -410,20 +439,14 @@ def train(args: TrainConfig) -> None:
             table.add_row("eval_avg_return", eval_avg_return_str, METRIC_DESCRIPTIONS["eval_avg_return"])
         console.print(table)
 
-    checkpoint_path = resolved_checkpoint_path or Path(args.checkpoint_path)
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    checkpoint = agent.to_checkpoint()
-    checkpoint.update(
-        {
-            "env_id": args.env_id,
-            "reward_names": reward_config.names,
-            "reward_config_path": (
-                resolved_reward_config.as_posix() if resolved_reward_config is not None else None
-            ),
-        }
-    )
-    torch.save(checkpoint, checkpoint_path)
-    console.print(f"[bold blue]Saved checkpoint to {checkpoint_path}[/bold blue]")
+    if checkpoint_path is not None:
+        _save_checkpoint(
+            agent=agent,
+            reward_config=reward_config,
+            args=args,
+            checkpoint_path=checkpoint_path,
+            reason="final",
+        )
 
 
 def _build_train_config(cfg: DictConfig) -> TrainConfig:

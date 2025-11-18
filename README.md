@@ -104,6 +104,25 @@ python scripts/run_webui.py --checkpoint checkpoints/halfcheetah.pth \
 
 The UI exposes sliders for each reward component and streams short rollouts generated with the latest weights.
 
+For the lightweight MiniGrid setup that ships with this repo (checkpoint saved under `checkpoints/latest-moppo.pt`), launch the UI like so:
+
+```bash
+python scripts/run_webui.py --checkpoint checkpoints/latest-moppo.pt \
+  --env-id MiniGrid-Empty-8x8-v0 --reward-config configs/minigrid_empty.py
+```
+
+### Pareto front visualization
+
+After training, generate Pareto fronts across every objective pair with `scripts/plot_pareto.py`. For the bundled MiniGrid checkpoint:
+
+```bash
+python scripts/plot_pareto.py --checkpoint checkpoints/latest-moppo.pt \
+  --env-id MiniGrid-Empty-8x8-v0 --reward-config configs/minigrid_empty.py \
+  --output-dir outputs/pareto_minigrid --num-points 50 --num-episodes 5 --seed 13
+```
+
+This sweeps weights between each pair of objectives, averages returns over `num_episodes`, and marks the equal-weight point (red `X`) on every scatter plot saved under the chosen `output_dir`.
+
 ## Notes
 
 - Default reward vector definitions are provided for a few MuJoCo environments as a starting point. Extend `configs/` with your own components or programmatic generators.

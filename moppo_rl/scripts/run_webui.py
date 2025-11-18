@@ -16,7 +16,7 @@ import torch
 import tyro
 
 from moppo.agents.moppo import MOPPOAgent, MOPPOConfig
-from moppo.envs.reward_wrappers import MultiObjectiveRewardWrapper
+from moppo.envs.factory import make_env
 from moppo.envs.reward_config import load_reward_config, RewardConfig
 
 
@@ -31,9 +31,17 @@ class WebUIArgs:
     fps: int = 30
 
 
-def build_env(env_id: str, reward_config: RewardConfig) -> gym.Env:
-    env = gym.make(env_id, render_mode="rgb_array")
-    env = MultiObjectiveRewardWrapper(env, reward_config)
+def build_env(env_id: str, reward_config: RewardConfig, seed: int | None = None) -> gym.Env:
+    # Reuse the full training wrapper stack so the agent sees identical observations.
+    env_seed = 0 if seed is None else seed
+    env = make_env(
+        env_id=env_id,
+        reward_config=reward_config,
+        seed=env_seed,
+        capture_video=False,
+        video_folder=None,
+        render_mode="rgb_array",
+    )
     return env
 
 
@@ -61,7 +69,7 @@ def run_ui(args: WebUIArgs) -> None:
     reward_config_path = args.reward_config or checkpoint.get("reward_config_path")
     reward_config = load_reward_config(reward_config_path, args.env_id)
 
-    env = build_env(args.env_id, reward_config)
+    env = build_env(args.env_id, reward_config, seed=args.seed)
     agent = load_agent(checkpoint, env, reward_config, args.device)
     env.close()
 
@@ -74,7 +82,7 @@ def run_ui(args: WebUIArgs) -> None:
             weights = np.ones_like(weights)
         weights = weights / weights.sum()
 
-        env_local = build_env(args.env_id, reward_config)
+        env_local = build_env(args.env_id, reward_config, seed=args.seed)
         obs_space = env_local.observation_space
         obs, _ = env_local.reset(seed=args.seed)
         flat_obs = np.asarray(space_utils.flatten(obs_space, obs), dtype=np.float32)

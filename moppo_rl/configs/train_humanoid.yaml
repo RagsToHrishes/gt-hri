@@ -1,9 +1,9 @@
 # Default Hydra configuration for training the MOPPO agent.
 
-env_id: HalfCheetah-v4
-reward_config: configs/mujoco_halfcheetah.py
+env_id: Humanoid-v4
+reward_config: configs/mujoco_humanoid.py
 total_steps: 50000000
-num_envs: 64
+num_envs: 8
 num_steps: 1024
 asynchronous_envs: true
 learning_rate: 3e-4
@@ -11,7 +11,7 @@ gamma: 0.99
 gae_lambda: 0.95
 clip_coef: 0.2
 update_epochs: 10
-minibatch_size: 8168
+minibatch_size: 1024
 entropy_coef: 0.01
 value_coef: 1.0
 max_grad_norm: 0.5
@@ -24,10 +24,10 @@ eval_interval: 10
 eval_episodes: 2
 eval_weights:
 eval_render_dir:
-eval_render_mode: none
+eval_render_mode: window
 eval_render_seconds: 5.0
-eval_weight_strategy: fixed
-eval_dirichlet_alpha: 1.0
+eval_weight_strategy: dirichlet
+eval_dirichlet_alpha: 0.5
 
 hydra:
   run:
