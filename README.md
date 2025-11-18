@@ -30,28 +30,32 @@ pip install -e .[web]
 
 ### Training
 
+Training is now powered by Hydra. The defaults live in `moppo_rl/configs/train.yaml`, so you can either edit that
+file, point `--config-path/--config-name` at a copy, or override individual fields inline with `key=value` style
+arguments. Hydra stores outputs under `outputs/train/<timestamp>` by default; override `hydra.run.dir`
+if you prefer a fixed log directory.
+
 ```bash
-python scripts/train.py --env-id HalfCheetah-v4 --total-steps 2_000_000 \
-  --reward-config configs/mujoco_halfcheetah.py --checkpoint-path checkpoints/halfcheetah.pth \
-  --eval-interval 10 --eval-episodes 2 --eval-render-mode window \
-  --eval-render-seconds 6 --eval-weights 0.34 0.33 0.33
+python scripts/train.py env_id=HalfCheetah-v4 total_steps=2_000_000 \
+  reward_config=configs/mujoco_halfcheetah.py checkpoint_path=checkpoints/halfcheetah.pth \
+  eval_interval=10 eval_episodes=2 eval_render_mode=window \
+  eval_render_seconds=6 eval_weights='[0.34,0.33,0.33]'
 ```
 
+`eval_interval` controls how often training pauses for deterministic rollouts, `eval_episodes` sets the
+number of episodes per evaluation, and `eval_weights` fixes the preference vector used for evaluation; omit the last
+flag to default to equal weights. Use `eval_render_mode=window` to briefly show each evaluation in a native
+viewer (capped by `eval_render_seconds`). To archive videos instead, pass `eval_render_mode=video` together with
+`eval_render_dir=<folder>` and the run will save mp4s under per-update subdirectories.
 
-`--eval-interval` controls how often training pauses for deterministic rollouts, `--eval-episodes` sets the
-number of episodes per evaluation, and `--eval-weights` fixes the preference vector used for evaluation; omit the
-last flag to default to equal weights. Use `--eval-render-mode window` to briefly show each evaluation in a native
-viewer (capped by `--eval-render-seconds`). To archive videos instead, pass `--eval-render-mode video` together with
-`--eval-render-dir <folder>` and the run will save mp4s under per-update subdirectories.
-
-To randomize evaluation preferences at every episode, set `--eval-weight-strategy` to `dirichlet`
-or `uniform` and optionally adjust `--eval-dirichlet-alpha`:
+To randomize evaluation preferences at every episode, set `eval_weight_strategy=dirichlet`
+or `eval_weight_strategy=uniform` and optionally adjust `eval_dirichlet_alpha`:
 
 ```bash
-python scripts/train.py --env-id MiniGrid-Empty-5x5-v0 --total-steps 500_000 \
-  --reward-config configs/minigrid_empty.py --checkpoint-path checkpoints/minigrid-empty.pth \
-  --eval-interval 5 --eval-episodes 4 --eval-render-mode window \
-  --eval-render-seconds 3 --eval-weight-strategy dirichlet --eval-dirichlet-alpha 0.5
+python scripts/train.py env_id=MiniGrid-Empty-5x5-v0 total_steps=500_000 \
+  reward_config=configs/minigrid_empty.py checkpoint_path=checkpoints/minigrid-empty.pth \
+  eval_interval=5 eval_episodes=4 eval_render_mode=window \
+  eval_render_seconds=3 eval_weight_strategy=dirichlet eval_dirichlet_alpha=0.5
 ```
 
 ### Evaluation with fixed weights
@@ -67,28 +71,28 @@ python scripts/evaluate.py --checkpoint checkpoints/halfcheetah.pth \
 For AntMaze or similar navigation tasks, point `--reward-config` at `configs/mujoco_antmaze.py`. The config exposes four reward components (`north`, `south`, `east`, `west`) that activate when the agent's planar velocity points toward the respective cardinal direction, making it easy to train policies that prioritize specific headings.
 
 ```bash
-python scripts/train.py --env-id AntMaze-UMaze-v2 --total-steps 2_000_000 \
-  --reward-config configs/mujoco_antmaze.py --checkpoint-path checkpoints/antmaze.pth \
-  --eval-interval 10 --eval-episodes 2 --eval-render-mode window \
-  --eval-render-seconds 6 --eval-weights 0.25 0.25 0.25 0.25
+python scripts/train.py env_id=AntMaze-UMaze-v2 total_steps=2_000_000 \
+  reward_config=configs/mujoco_antmaze.py checkpoint_path=checkpoints/antmaze.pth \
+  eval_interval=10 eval_episodes=2 eval_render_mode=window \
+  eval_render_seconds=6 eval_weights='[0.25,0.25,0.25,0.25]'
 ```
 
 Classic Minari point-maze datasets (e.g., `maze2d-medium-v1`) can use `configs/minari_point_maze.py` for the same directional reward vector while adapting to the point-mass observation format.
 
 ```bash
-python scripts/train.py --env-id maze2d-medium-v1 --total-steps 1_000_000 \
-  --reward-config configs/minari_point_maze.py --checkpoint-path checkpoints/maze2d-medium.pth \
-  --eval-interval 5 --eval-episodes 2 --eval-render-mode window \
-  --eval-render-seconds 4 --eval-weights 0.25 0.25 0.25 0.25
+python scripts/train.py env_id=maze2d-medium-v1 total_steps=1_000_000 \
+  reward_config=configs/minari_point_maze.py checkpoint_path=checkpoints/maze2d-medium.pth \
+  eval_interval=5 eval_episodes=2 eval_render_mode=window \
+  eval_render_seconds=4 eval_weights='[0.25,0.25,0.25,0.25]'
 ```
 
 For lightweight grid worlds such as `MiniGrid-Empty-5x5-v0`, use `configs/minigrid_empty.py` (requires `gymnasium-minigrid`) to prefer different walls:
 
 ```bash
-python scripts/train.py --env-id MiniGrid-Empty-5x5-v0 --total-steps 500_000 \
-  --reward-config configs/minigrid_empty.py --checkpoint-path checkpoints/minigrid-empty.pth \
-  --eval-interval 5 --eval-episodes 4 --eval-render-mode window \
-  --eval-render-seconds 3 --eval-weights 0.25 0.25 0.25 0.25
+python scripts/train.py env_id=MiniGrid-Empty-5x5-v0 total_steps=500_000 \
+  reward_config=configs/minigrid_empty.py checkpoint_path=checkpoints/minigrid-empty.pth \
+  eval_interval=5 eval_episodes=4 eval_render_mode=window \
+  eval_render_seconds=3 eval_weights='[0.25,0.25,0.25,0.25]'
 ```
 
 ### Interactive weight steering

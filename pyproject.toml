@@ -13,6 +13,7 @@ dependencies = [
   "gymnasium[mujoco]>=0.29",
   "numpy>=1.24",
   "torch>=2.1",
+  "hydra-core>=1.3",
   "tyro>=0.5",
   "tqdm>=4.66",
   "rich>=13.7",
