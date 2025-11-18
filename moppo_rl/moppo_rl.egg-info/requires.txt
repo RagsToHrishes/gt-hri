@@ -1,0 +1,14 @@
+gymnasium[mujoco]>=0.29
+numpy>=1.24
+torch>=2.1
+tyro>=0.5
+tqdm>=4.66
+rich>=13.7
+imageio>=2.31
+imageio-ffmpeg>=0.4
+matplotlib>=3.8
+
+[web]
+gradio>=4.31
+fastapi>=0.110
+uvicorn>=0.29
