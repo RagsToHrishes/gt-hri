@@ -18,6 +18,7 @@ dependencies = [
   "rich>=13.7",
   "imageio>=2.31",
   "imageio-ffmpeg>=0.4",
+  "moviepy>=1.0",
   "matplotlib>=3.8"
 ]
 
