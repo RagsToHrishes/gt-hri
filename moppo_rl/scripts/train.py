@@ -6,7 +6,9 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 from typing import Literal, Optional, Sequence
+import socket
 import subprocess
+import sys
 import threading
 import time
 import webbrowser
@@ -34,6 +36,7 @@ from moppo.envs.factory import make_env, make_vectorized_env
 from moppo.envs.reward_config import RewardConfig, load_reward_config
 from moppo.agents.moppo import MOPPOAgent, MOPPOConfig
 from moppo.storage.rollout_buffer import RolloutBuffer
+from moppo.utils.device import resolve_device
 from moppo.utils.weights import WeightSampler
 
 
@@ -72,7 +75,7 @@ class TrainConfig:
     dirichlet_alpha: float = 1.0
     weight_strategy: str = "dirichlet"
     seed: int = 7
-    device: str = "cpu"
+    device: str = "auto"
     eval_interval: int = 10
     eval_episodes: int = 2
     eval_weights: Optional[Sequence[float]] = None
@@ -81,8 +84,9 @@ class TrainConfig:
     eval_render_seconds: float = 5.0
     eval_weight_strategy: Literal["fixed", "dirichlet", "uniform"] = "fixed"
     eval_dirichlet_alpha: float = 1.0
+    enable_console_output: bool = True
     enable_tensorboard: bool = True
-    tensorboard_port: int = 6006
+    tensorboard_port: int = 6009
     tensorboard_host: str = "127.0.0.1"
     tensorboard_auto_open: bool = True
     tensorboard_log_dir: Optional[str] = None
@@ -115,6 +119,32 @@ def _resolve_path(path_str: Optional[str], workspace_dir: Path) -> Optional[Path
     if not path.is_absolute():
         path = workspace_dir / path
     return path
+
+
+def _rewrite_cli_args(argv: list[str]) -> list[str]:
+    """Translate friendly CLI flags into Hydra overrides."""
+    if len(argv) <= 1:
+        return argv
+    rewritten: list[str] = [argv[0]]
+    idx = 1
+    while idx < len(argv):
+        arg = argv[idx]
+        if arg in ("--tensorboard-port", "--tensorboard_port"):
+            if idx + 1 >= len(argv):
+                rewritten.append(arg)
+                break
+            value = argv[idx + 1]
+            idx += 2
+            rewritten.append(f"tensorboard_port={value}")
+            continue
+        if arg.startswith("--tensorboard-port=") or arg.startswith("--tensorboard_port="):
+            _, value = arg.split("=", 1)
+            idx += 1
+            rewritten.append(f"tensorboard_port={value}")
+            continue
+        rewritten.append(arg)
+        idx += 1
+    return rewritten
 
 
 def prepare_agent(env: gym.Env, reward_config: RewardConfig, args: TrainConfig) -> MOPPOAgent:
@@ -670,33 +700,55 @@ class TensorBoardLogger:
         except OSError as error:
             console.print(f"[yellow]Could not open TensorBoard log file: {error}[/yellow]")
             log_handle = None
-        cmd = [
-            "tensorboard",
-            "--logdir",
-            str(self.log_dir),
-            "--host",
-            host,
-            "--port",
-            str(port),
-        ]
         stdout_target = log_handle if log_handle is not None else subprocess.DEVNULL
-        try:
-            self._process = subprocess.Popen(cmd, stdout=stdout_target, stderr=subprocess.STDOUT, text=True)
-            self._log_handle = log_handle
-            self._tb_url = f"http://{host}:{port}/"
-            console.print(f"[bold green]TensorBoard listening at {self._tb_url}[/bold green]")
-            if auto_open:
-                threading.Thread(target=self._open_browser, args=(self._tb_url,), daemon=True).start()
-        except FileNotFoundError:
-            console.print("[yellow]TensorBoard CLI not found; install 'tensorboard' to enable live metrics.[/yellow]")
-            if log_handle is not None:
-                log_handle.close()
-            self._process = None
-        except Exception as error:
-            console.print(f"[yellow]Failed to launch TensorBoard: {error}[/yellow]")
-            if log_handle is not None:
-                log_handle.close()
-            self._process = None
+        max_attempts = 20
+        last_error: Exception | None = None
+
+        def _port_available(candidate_host: str, candidate_port: int) -> bool:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    sock.bind((candidate_host, candidate_port))
+                except OSError:
+                    return False
+            return True
+
+        for offset in range(max_attempts):
+            candidate_port = port + offset
+            if not _port_available(host, candidate_port):
+                console.print(
+                    f"[yellow]TensorBoard port {candidate_port} unavailable; trying {candidate_port + 1}[/yellow]"
+                )
+                continue
+            cmd = [
+                "tensorboard",
+                "--logdir",
+                str(self.log_dir),
+                "--host",
+                host,
+                "--port",
+                str(candidate_port),
+            ]
+            try:
+                self._process = subprocess.Popen(cmd, stdout=stdout_target, stderr=subprocess.STDOUT, text=True)
+                self._log_handle = log_handle
+                self._tb_url = f"http://{host}:{candidate_port}/"
+                console.print(f"[bold green]TensorBoard listening at {self._tb_url}[/bold green]")
+                if auto_open:
+                    threading.Thread(target=self._open_browser, args=(self._tb_url,), daemon=True).start()
+                return
+            except FileNotFoundError:
+                console.print("[yellow]TensorBoard CLI not found; install 'tensorboard' to enable live metrics.[/yellow]")
+                break
+            except Exception as error:
+                last_error = error
+                continue
+
+        if log_handle is not None:
+            log_handle.close()
+        self._process = None
+        if last_error is not None:
+            console.print(f"[yellow]Failed to launch TensorBoard: {last_error}[/yellow]")
 
     @staticmethod
     def _open_browser(url: str) -> None:
@@ -823,7 +875,11 @@ class TensorBoardLogger:
             except Exception:
                 pass
             self._log_handle = None
+
+
 def train(args: TrainConfig) -> None:
+    console.quiet = not args.enable_console_output
+    args.device = resolve_device(args.device, console=console)
     workspace_dir = _get_workspace_dir()
     run_dir = Path.cwd()
     artifact_dir = _build_run_artifact_dir(args.env_id, workspace_dir)
@@ -834,6 +890,10 @@ def train(args: TrainConfig) -> None:
     checkpoint_path = artifact_dir / "checkpoint.pt"
     if tensorboard_log_dir is None:
         tensorboard_log_dir = artifact_dir / "tensorboard"
+
+    if eval_render_dir is None and args.eval_render_mode == "video":
+        eval_render_dir = artifact_dir / "eval_videos"
+
     tensorboard_video_root = artifact_dir / "tensorboard_eval_videos"
     pareto_plot_dir = (
         _resolve_path(args.pareto_plot_dir, workspace_dir) if args.pareto_plot_dir else artifact_dir / "pareto_eval"
@@ -895,8 +955,10 @@ def train(args: TrainConfig) -> None:
         auto_open=args.tensorboard_auto_open,
         log_videos=args.tensorboard_log_videos,
     )
-    console.print(f"[bold green]Run artifacts (checkpoints & Pareto logs) will be stored in {artifact_dir}[/bold green]")
-    console.print(f"[bold green]Training metrics will be recorded in {metrics_logger.log_path}[/bold green]")
+    console.print(
+        f"[bold green]Run artifacts (checkpoints, metrics, eval outputs, TensorBoard) live under {artifact_dir}[/bold green]"
+    )
+    console.print(f"[bold green]Training metrics JSONL: {metrics_logger.log_path}[/bold green]")
 
     console.print(f"[bold green]Starting training for {num_updates} updates ({args.total_steps} steps).[/bold green]")
 
@@ -978,42 +1040,68 @@ def train(args: TrainConfig) -> None:
 
             should_eval = (
                 args.eval_interval > 0
-                and args.eval_episodes > 0
                 and ((update + 1) % args.eval_interval == 0 or update == num_updates - 1)
             )
             if should_eval:
-                (
-                    eval_avg_return,
-                    eval_video_path,
-                    eval_episodes_run,
-                    eval_weight_logs,
-                ) = run_evaluation(
-                    agent=agent,
-                    reward_config=reward_config,
-                    env_id=args.env_id,
-                    weights=eval_weights,
-                    weight_sampler=eval_weight_sampler,
-                    num_episodes=args.eval_episodes,
-                    seed=args.seed + update,
-                    video_root=eval_video_root,
-                    step_label=f"update_{update + 1:05d}",
-                    render_mode=eval_render_mode,
-                    max_display_seconds=eval_render_seconds,
-                )
-                eval_str = ", ".join(f"{val:.2f}" for val in eval_avg_return)
-                console.print(
-                    f"[bold cyan]Evaluation ({eval_episodes_run}/{args.eval_episodes} episodes) avg return:[/bold cyan] {eval_str}"
-                )
-                if eval_weight_logs:
-                    console.print("[magenta]Evaluation preference weights:[/magenta]")
-                    for log_entry in eval_weight_logs:
-                        console.print(f"  {log_entry}")
-                if eval_render_mode == "window" and eval_episodes_run < args.eval_episodes:
-                    console.print(
-                        "[yellow]Stopped evaluation early after hitting the render time budget.[/yellow]"
+                if args.eval_episodes > 0:
+                    (
+                        eval_avg_return,
+                        eval_video_path,
+                        eval_episodes_run,
+                        eval_weight_logs,
+                    ) = run_evaluation(
+                        agent=agent,
+                        reward_config=reward_config,
+                        env_id=args.env_id,
+                        weights=eval_weights,
+                        weight_sampler=eval_weight_sampler,
+                        num_episodes=args.eval_episodes,
+                        seed=args.seed + update,
+                        video_root=eval_video_root,
+                        step_label=f"update_{update + 1:05d}",
+                        render_mode=eval_render_mode,
+                        max_display_seconds=eval_render_seconds,
                     )
-                if eval_video_path is not None:
-                    console.print(f"[cyan]Saved evaluation video to {eval_video_path}[/cyan]")
+                    eval_str = ", ".join(f"{val:.2f}" for val in eval_avg_return)
+                    console.print(
+                        f"[bold cyan]Evaluation ({eval_episodes_run}/{args.eval_episodes} episodes) avg return:[/bold cyan] {eval_str}"
+                    )
+                    if eval_weight_logs:
+                        console.print("[magenta]Evaluation preference weights:[/magenta]")
+                        for log_entry in eval_weight_logs:
+                            console.print(f"  {log_entry}")
+                    if eval_render_mode == "window" and eval_episodes_run < args.eval_episodes:
+                        console.print(
+                            "[yellow]Stopped evaluation early after hitting the render time budget.[/yellow]"
+                        )
+                    if eval_video_path is not None:
+                        console.print(f"[cyan]Saved evaluation video to {eval_video_path}[/cyan]")
+
+                    tb_eval_video_path = eval_video_path
+                    if tensorboard_logger.wants_videos:
+                        video_source = tb_eval_video_path
+                        if video_source is None and args.tensorboard_log_videos:
+                            desired_episodes = args.tensorboard_video_episodes
+                            if args.eval_episodes > 0:
+                                desired_episodes = min(args.eval_episodes, desired_episodes)
+                            if desired_episodes > 0:
+                                video_source = _record_tensorboard_video(
+                                    agent=agent,
+                                    reward_config=reward_config,
+                                    env_id=args.env_id,
+                                    weights=eval_weights,
+                                    weight_sampler=eval_weight_sampler,
+                                    num_episodes=desired_episodes,
+                                    seed=args.seed + update,
+                                    video_root=tensorboard_video_root,
+                                    update_index=update + 1,
+                                )
+                        if video_source is not None:
+                            tensorboard_logger.log_video(
+                                video_source,
+                                tag="eval/video",
+                                global_step=global_step,
+                            )
                 _save_checkpoint(
                     agent=agent,
                     reward_config=reward_config,
@@ -1021,31 +1109,7 @@ def train(args: TrainConfig) -> None:
                     checkpoint_path=checkpoint_path,
                     reason=f"after evaluation update {update + 1}",
                 )
-                tb_eval_video_path = eval_video_path
-                if tensorboard_logger.wants_videos:
-                    video_source = tb_eval_video_path
-                    if video_source is None and args.tensorboard_log_videos:
-                        desired_episodes = args.tensorboard_video_episodes
-                        if args.eval_episodes > 0:
-                            desired_episodes = min(args.eval_episodes, desired_episodes)
-                        if desired_episodes > 0:
-                            video_source = _record_tensorboard_video(
-                                agent=agent,
-                                reward_config=reward_config,
-                                env_id=args.env_id,
-                                weights=eval_weights,
-                                weight_sampler=eval_weight_sampler,
-                                num_episodes=desired_episodes,
-                                seed=args.seed + update,
-                                video_root=tensorboard_video_root,
-                                update_index=update + 1,
-                            )
-                    if video_source is not None:
-                        tensorboard_logger.log_video(
-                            video_source,
-                            tag="eval/video",
-                            global_step=global_step,
-                        )
+                
                 pareto_result = _run_pareto_analysis(
                     agent=agent,
                     reward_config=reward_config,
@@ -1126,4 +1190,5 @@ def main(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
+    sys.argv = _rewrite_cli_args(list(sys.argv))
     main()

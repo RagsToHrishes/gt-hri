@@ -1,7 +1,5 @@
-# Default Hydra configuration for training the MOPPO agent.
-
-env_id: MiniGrid-Empty-8x8-v0
-reward_config: configs/minigrid_empty.py
+env_id: HalfCheetah-v4
+reward_config: configs/mujoco_halfcheetah.py
 total_steps: 50000000
 num_envs: 8
 num_steps: 1024
@@ -18,15 +16,17 @@ max_grad_norm: 0.5
 dirichlet_alpha: 1.0
 weight_strategy: dirichlet
 seed: 7
-device: cpu
-eval_interval: 10
-eval_episodes: 2
+device: auto
+eval_interval: 25
+eval_episodes: 0
 eval_weights:
 eval_render_dir:
-eval_render_mode: window
+eval_render_mode: none
 eval_render_seconds: 5.0
 eval_weight_strategy: dirichlet
 eval_dirichlet_alpha: 0.5
+enable_console_output: true
+
 
 hydra:
   run:

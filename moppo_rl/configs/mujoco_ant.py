@@ -8,7 +8,7 @@ from moppo.envs.reward_config import RewardComponent, RewardConfig
 
 def build_config(
     env_id: str,
-    style_percentage: float = 1,  # fraction of |base reward| used for style shaping
+    style_percentage: float = 0.5,  # fraction of |base reward| used for style shaping
 ) -> RewardConfig:
     """
     Multi-objective reward config for Ant-v4.

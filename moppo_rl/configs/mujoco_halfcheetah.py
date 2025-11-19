@@ -8,7 +8,7 @@ from moppo.envs.reward_config import RewardComponent, RewardConfig
 
 def build_config(
     env_id: str,
-    style_percentage: float = 1,  # e.g. 0.2 ⇒ style can add/subtract up to ~20% of |base|
+    style_percentage: float = 0.5,  # e.g. 0.2 ⇒ style can add/subtract up to ~20% of |base|
 ) -> RewardConfig:
     if env_id != "HalfCheetah-v4":
         raise ValueError("This config is tailored for HalfCheetah-v4.")

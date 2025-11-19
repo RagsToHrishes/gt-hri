@@ -18,15 +18,16 @@ max_grad_norm: 0.5
 dirichlet_alpha: 1.0
 weight_strategy: dirichlet
 seed: 7
-device: cpu
+device: auto
 eval_interval: 10
-eval_episodes: 2
+eval_episodes: 1
 eval_weights:
 eval_render_dir:
-eval_render_mode: window
+eval_render_mode: none
 eval_render_seconds: 5.0
 eval_weight_strategy: dirichlet
 eval_dirichlet_alpha: 0.5
+enable_console_output: false
 
 hydra:
   run:

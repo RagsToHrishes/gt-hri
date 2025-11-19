@@ -14,10 +14,12 @@ import imageio
 import numpy as np
 import torch
 import tyro
+from rich.console import Console
 
 from moppo.agents.moppo import MOPPOAgent, MOPPOConfig
 from moppo.envs.factory import make_env
 from moppo.envs.reward_config import load_reward_config, RewardConfig
+from moppo.utils.device import resolve_device
 
 
 @dataclass
@@ -25,10 +27,21 @@ class WebUIArgs:
     checkpoint: str
     env_id: str
     reward_config: Optional[str] = None
-    device: str = "cpu"
+    device: str = "auto"
     seed: int = 0
     rollout_steps: int = 400
     fps: int = 30
+
+
+console = Console()
+
+
+def _ensure_unhealthy_disabled(env: gym.Env) -> None:
+    """Make sure mujoco-style envs ignore early termination when unhealthy."""
+    base_env = getattr(env, "unwrapped", env)
+    for attr in ("terminate_when_unhealthy", "terminate_if_unhealthy"):
+        if hasattr(base_env, attr):
+            setattr(base_env, attr, False)
 
 
 def build_env(env_id: str, reward_config: RewardConfig, seed: int | None = None) -> gym.Env:
@@ -42,6 +55,7 @@ def build_env(env_id: str, reward_config: RewardConfig, seed: int | None = None)
         video_folder=None,
         render_mode="rgb_array",
     )
+    _ensure_unhealthy_disabled(env)
     return env
 
 
@@ -65,6 +79,7 @@ def create_video(frames: List[np.ndarray], fps: int) -> str:
 
 
 def run_ui(args: WebUIArgs) -> None:
+    args.device = resolve_device(args.device, console=console)
     checkpoint = torch.load(Path(args.checkpoint), map_location=args.device)
     reward_config_path = args.reward_config or checkpoint.get("reward_config_path")
     reward_config = load_reward_config(reward_config_path, args.env_id)
@@ -91,7 +106,8 @@ def run_ui(args: WebUIArgs) -> None:
         total_rewards = np.zeros(reward_config.reward_dim, dtype=np.float32)
         weight_tensor = torch.tensor(weights, dtype=torch.float32, device=agent.device).unsqueeze(0)
 
-        for _ in range(args.rollout_steps):
+        steps = 0
+        while steps < args.rollout_steps:
             obs_tensor = torch.as_tensor(flat_obs, dtype=torch.float32, device=agent.device).view(1, -1)
             action_tensor = agent.act_deterministic(obs_tensor, weight_tensor)
             env_action = agent.actions_to_env(action_tensor)[0]
@@ -101,8 +117,14 @@ def run_ui(args: WebUIArgs) -> None:
             if frame is not None:
                 frames.append(frame)
             total_rewards += info.get("reward_vector", np.array([reward], dtype=np.float32))
+            steps += 1
             if terminated or truncated:
-                break
+                obs, _ = env_local.reset()
+                flat_obs = np.asarray(space_utils.flatten(obs_space, obs), dtype=np.float32)
+                frame = env_local.render()
+                if frame is not None:
+                    frames.append(frame)
+
         env_local.close()
 
         video_path = create_video(frames, fps=args.fps)

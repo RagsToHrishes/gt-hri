@@ -20,6 +20,7 @@ from rich.console import Console
 from moppo.agents.moppo import MOPPOAgent, MOPPOConfig
 from moppo.envs.reward_config import RewardConfig, load_reward_config
 from moppo.envs.factory import make_env as build_env
+from moppo.utils.device import resolve_device
 
 
 console = Console()
@@ -36,7 +37,7 @@ class ParetoArgs:
     num_points: int = 11
     num_episodes: int = 3
     seed: int = 42
-    device: str = "cpu"
+    device: str = "auto"
 
 
 def load_agent(checkpoint: dict, env: gym.Env, reward_config: RewardConfig, device: str) -> MOPPOAgent:
@@ -178,6 +179,7 @@ def plot_pair(
 
 
 def plot_pareto(args: ParetoArgs) -> None:
+    args.device = resolve_device(args.device, console=console)
     checkpoint_path = Path(args.checkpoint)
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")

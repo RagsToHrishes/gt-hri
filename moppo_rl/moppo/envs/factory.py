@@ -32,6 +32,14 @@ def _ensure_flat_box_observations(env: gym.Env) -> gym.Env:
     return env
 
 
+def _disable_unhealthy_termination(env: gym.Env) -> None:
+    """Force Mujoco-style envs to ignore unhealthy termination flags when available."""
+    base_env = getattr(env, "unwrapped", env)
+    for attr in ("terminate_when_unhealthy", "terminate_if_unhealthy"):
+        if hasattr(base_env, attr):
+            setattr(base_env, attr, False)
+
+
 def make_env(
     env_id: str,
     reward_config: RewardConfig,
@@ -45,6 +53,7 @@ def make_env(
     """Create a fully wrapped single environment instance."""
 
     env = gym.make(env_id, render_mode=render_mode)
+    _disable_unhealthy_termination(env)
     env = _maybe_flatten_minigrid(env, env_id)
     if capture_video and video_folder is not None:
         env = gym.wrappers.RecordVideo(

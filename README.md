@@ -32,8 +32,11 @@ pip install -e .[web]
 
 Training is now powered by Hydra. The defaults live in `moppo_rl/configs/train.yaml`, so you can either edit that
 file, point `--config-path/--config-name` at a copy, or override individual fields inline with `key=value` style
-arguments. Hydra stores outputs under `outputs/train/<timestamp>` by default; override `hydra.run.dir`
-if you prefer a fixed log directory.
+arguments. Hydra stores its own outputs under `outputs/train/<timestamp>` by default; override `hydra.run.dir`
+if you prefer a fixed log directory. Every training invocation also builds a dedicated artifact folder under
+`checkpoints/<env_id>_<timestamp>/` (non-alphanumeric characters in the environment name turn into `_`) that collects the
+checkpoint, metrics JSONL, TensorBoard events, evaluation videos, and Pareto analysis dumps. We'll refer to this folder
+as `<artifact_dir>` below.
 
 ```bash
 python scripts/train.py env_id=HalfCheetah-v4 total_steps=2_000_000 \
@@ -42,18 +45,18 @@ python scripts/train.py env_id=HalfCheetah-v4 total_steps=2_000_000 \
   eval_render_seconds=6 eval_weights='[0.34,0.33,0.33]'
 ```
 
-Every run automatically saves checkpoints under `checkpoints/<env_id>_<timestamp>.pt` (non-alphanumeric
-characters in the environment name turn into `_`). Look for the checkpoint path printed after each evaluation
-to point the UI or Pareto scripts at the most recent weights.
+The latest weights always live at `<artifact_dir>/checkpoint.pt`. Look for the checkpoint path printed after each
+evaluation to point the UI or Pareto scripts at the most recent weights.
 
 `eval_interval` controls how often training pauses for deterministic rollouts, `eval_episodes` sets the
 number of episodes per evaluation, and `eval_weights` fixes the preference vector used for evaluation; omit the last
 flag to default to equal weights. Use `eval_render_mode=window` to briefly show each evaluation in a native
-viewer (capped by `eval_render_seconds`). To archive videos instead, pass `eval_render_mode=video` together with
-`eval_render_dir=<folder>` and the run will save mp4s under per-update subdirectories.
+viewer (capped by `eval_render_seconds`). To archive videos instead, set `eval_render_mode=video`; omit
+`eval_render_dir` to store mp4s under `<artifact_dir>/eval_videos/update_<step>_*` or override the path via
+`eval_render_dir=<folder>`.
 
-Every run also streams summaries to TensorBoard under `<hydra run>/tensorboard`, launches a local server on
-`http://127.0.0.1:6006`, and opens your browser automatically. PPO losses, gradient stats, and each reward component are
+Every run also streams summaries to TensorBoard inside `<artifact_dir>/tensorboard`, launches a local server on
+`http://127.0.0.1:6008`, and opens your browser automatically. PPO losses, gradient stats, and each reward component are
 logged per update, while deterministic evaluation returns and videos appear under the `eval/` namespace. Disable or tweak
 this behavior via Hydra overrides (use `tensorboard_log_dir=...` to redirect event files):
 
@@ -69,7 +72,7 @@ set `tensorboard_video_episodes=<n>` to control how long those recordings are.
 Each evaluation step also reuses a fixed batch of preference weights (`pareto_num_samples`, drawn with
 `pareto_weight_strategy/pareto_dirichlet_alpha`) to sweep the learned policy and build a sampled Pareto front. The
 resulting hypervolume is printed and logged to TensorBoard, while radar/spider plots and raw JSON data are saved under
-`<hydra run>/pareto_eval/update_<step>_*`. Override `pareto_weights=[[...], ...]`, `pareto_eval_episodes`,
+`<artifact_dir>/pareto_eval/update_<step>_*`. Override `pareto_weights=[[...], ...]`, `pareto_eval_episodes`,
 `pareto_reference_point`, or disable the extra sweep entirely with `pareto_num_samples=0`.
 
 To randomize evaluation preferences at every episode, set `eval_weight_strategy=dirichlet`
@@ -149,14 +152,13 @@ This sweeps weights between each pair of objectives, averages returns over `num_
 
 ### Training reward curves
 
-Every training run logs PPO statistics and the averaged reward vector per update to `training_metrics.jsonl` inside the
-Hydra run directory (e.g., `outputs/train/<timestamp>/training_metrics.jsonl`). Plot the per-component reward curves
-with:
+Every training run logs PPO statistics and the averaged reward vector per update to `<artifact_dir>/training_metrics.jsonl`.
+Plot the per-component reward curves with:
 
 ```bash
 python scripts/plot_training_rewards.py \
-  --log-file outputs/train/2024-05-09_12-00-00/training_metrics.jsonl \
-  --output outputs/train/2024-05-09_12-00-00/reward_curve.png \
+  --log-file checkpoints/HalfCheetah-v4_2024-05-09-12-00-00/training_metrics.jsonl \
+  --output checkpoints/HalfCheetah-v4_2024-05-09-12-00-00/reward_curve.png \
   --include-eval
 ```
 
@@ -172,6 +174,17 @@ each objective evolves over time. The JSON log also keeps the underlying PPO met
 - AntMaze task IDs come from `d4rl`/`minari` and require a local MuJoCo installation; install `gymnasium-robotics`, `d4rl`, and `minari`, configure MuJoCo per their READMEs, and run `python -c "import minari; minari.register_d4rl_datasets()"` once to expose the offline maze environments.
 - MiniGrid examples depend on `gymnasium-minigrid`; install it separately if you want to run the empty-room command.
 
-
-python scripts/run_webui.py --checkpoint checkpoints/Hopper-v4_20251118-192209/checkpoint.pt \
+python scripts/run_webui.py --checkpoint /home/hrish/hri/moppo_rl/checkpoints/Hopper-v4_20251118-230533/checkpoint.pt \
   --env-id Hopper-v4 --reward-config configs/mujoco_hopper.py
+
+  python scripts/run_webui.py --checkpoint /home/hrish/hri/moppo_rl/checkpoints/Ant-v4_20251118-230533/checkpoint.pt \
+  --env-id Ant-v4 --reward-config configs/mujoco_ant.py
+
+    python scripts/run_webui.py --checkpoint /home/hrish/hri/moppo_rl/checkpoints/HalfCheetah-v4_20251118-230532/checkpoint.pt \
+  --env-id HalfCheetah-v4 --reward-config configs/mujoco_halfcheetah.py
+
+
+     python scripts/run_webui.py --checkpoint /home/hrish/hri/moppo_rl/checkpoints/Humanoid-v4_20251118-230532/checkpoint.pt \
+  --env-id Humanoid-v4 --reward-config configs/mujoco_humanoid.py
+
+

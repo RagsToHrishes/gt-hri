@@ -16,6 +16,7 @@ from rich.console import Console
 from moppo.agents.moppo import MOPPOAgent, MOPPOConfig
 from moppo.envs.reward_config import load_reward_config, RewardConfig
 from moppo.envs.reward_wrappers import MultiObjectiveRewardWrapper
+from moppo.utils.device import resolve_device
 
 
 console = Console()
@@ -28,7 +29,7 @@ class EvalArgs:
     reward_config: Optional[str] = None
     weights: Sequence[float] = (1.0,)
     num_episodes: int = 5
-    device: str = "cpu"
+    device: str = "auto"
     seed: int = 42
 
 
@@ -42,6 +43,8 @@ def load_agent(checkpoint: dict, env: gym.Env, reward_config: RewardConfig, devi
 
 
 def evaluate(args: EvalArgs) -> None:
+    resolved_device = resolve_device(args.device, console=console)
+    args.device = resolved_device
     checkpoint_path = Path(args.checkpoint)
     checkpoint = torch.load(checkpoint_path, map_location=args.device)
     reward_config_path = args.reward_config or checkpoint.get("reward_config_path")
