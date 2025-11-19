@@ -171,3 +171,7 @@ each objective evolves over time. The JSON log also keeps the underlying PPO met
 - Evaluation video export depends on `moviepy`; installing the package (e.g., via `pip install -e .[web]`) pulls it in automatically.
 - AntMaze task IDs come from `d4rl`/`minari` and require a local MuJoCo installation; install `gymnasium-robotics`, `d4rl`, and `minari`, configure MuJoCo per their READMEs, and run `python -c "import minari; minari.register_d4rl_datasets()"` once to expose the offline maze environments.
 - MiniGrid examples depend on `gymnasium-minigrid`; install it separately if you want to run the empty-room command.
+
+
+python scripts/run_webui.py --checkpoint checkpoints/Hopper-v4_20251118-192209/checkpoint.pt \
+  --env-id Hopper-v4 --reward-config configs/mujoco_hopper.py

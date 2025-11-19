@@ -8,7 +8,7 @@ from moppo.envs.reward_config import RewardComponent, RewardConfig
 
 def build_config(
     env_id: str,
-    style_percentage: float = 0.2,  # fraction of |base reward| used for style shaping
+    style_percentage: float = 1,  # fraction of |base reward| used for style shaping
 ) -> RewardConfig:
     """
     Multi-objective reward config for Ant-v4.
@@ -105,6 +105,88 @@ def build_config(
         ref_ctrl = 0.1  # reference control magnitude; tune if needed
         style_raw = (ref_ctrl - ctrl_norm) / max(ref_ctrl, eps)
         return float(np.tanh(style_raw))
+    
+    def _style_shake(obs, action, reward, term, trunc, info):
+        """
+        SHAKE MODE:
+        - Maximize joint velocity magnitude (fast shaking)
+        - Encourage rapid changes (jerk-like behavior)
+        - Adds some torso wiggle for extra chaos
+        """
+
+        joint_vel = np.asarray(obs[23:31], dtype=np.float32)
+        speed = float(np.mean(np.abs(joint_vel)))
+
+        # Approximate "jerk" using differences between velocities
+        jerk = float(np.mean(np.abs(np.diff(joint_vel)))) if len(joint_vel) > 1 else 0.0
+
+        # Add torso shake
+        torso_ang_vel = np.asarray(obs[13:16], dtype=np.float32)
+        torso_wiggle = float(np.mean(np.abs(torso_ang_vel)))
+
+        style_raw = (
+            0.55 * (speed / 12.0) +     # extremely active legs
+            0.30 * (jerk / 8.0) +       # spiky / jerky movement
+            0.15 * (torso_wiggle / 6.0)
+        )
+
+        return float(np.tanh(style_raw))
+    
+    def _style_stilt(obs, action, reward, term, trunc, info):
+        """
+        STILT WALKER MODE:
+        - Encourage tall torso height
+        - Encourage joint angles that correspond to full leg extension
+        - Penalize torso tilt so stilts stay stable
+        """
+
+        torso_height = float(obs[0])
+        height_term = (torso_height - 0.55) / 0.3   # typical height ~0.55–0.8
+
+        # Leg extension = small joint angle magnitude (close to neutral)
+        joint_pos = np.asarray(obs[15:23], dtype=np.float32)
+        relaxed_legs = 1.0 - np.tanh(float(np.mean(np.abs(joint_pos))) / 1.5)
+
+        # Stable torso (little roll/pitch)
+        torso_tilt = np.asarray(obs[1:3], dtype=np.float32)   # roll, pitch approx
+        upright_term = 1.0 - np.tanh(float(np.linalg.norm(torso_tilt)) / 0.3)
+
+        style_raw = (
+            0.50 * height_term +
+            0.30 * relaxed_legs +
+            0.20 * upright_term
+        )
+
+        return float(np.clip(style_raw, -1.0, 1.0))
+    
+    def _style_flip(obs, action, reward, term, trunc, info):
+        """
+        FLIP MODE:
+        - Encourage large torso angular velocity around pitch axis (flipping)
+        - Reward airtime (low contact / higher torso)
+        - Add small reward for forward movement while flipping
+        """
+
+        torso_ang_vel = np.asarray(obs[13:16], dtype=np.float32)
+        pitch_vel = float(torso_ang_vel[1])   # pitch axis flipping
+
+        flip_term = pitch_vel / 10.0
+
+        # Use torso height as "airtime"
+        torso_height = float(obs[0])
+        airtime_term = (torso_height - 0.55) / 0.25
+
+        # Small forward bonus (optional)
+        forward_v = float(info.get("x_velocity", 0.0))
+        forward_term = forward_v / 4.0
+
+        style_raw = (
+            0.65 * flip_term +
+            0.25 * airtime_term +
+            0.10 * forward_term
+        )
+
+        return float(np.tanh(style_raw))
 
     # --- Final reward components: base + style -----------------------------------
 
@@ -133,13 +215,27 @@ def build_config(
         style = _style_energy_efficient(obs, action, reward, term, trunc, info)
         return _apply_style(base, style)
 
+    def shake(obs, action, reward, term, trunc, info):
+        base = _base_reward(obs, action, reward, term, trunc, info)
+        style = _style_shake(obs, action, reward, term, trunc, info)
+        return _apply_style(base, style)
+
+    def stilt(obs, action, reward, term, trunc, info):
+        base = _base_reward(obs, action, reward, term, trunc, info)
+        style = _style_stilt(obs, action, reward, term, trunc, info)
+        return _apply_style(base, style)
+
+    def flip(obs, action, reward, term, trunc, info):
+        base = _base_reward(obs, action, reward, term, trunc, info)
+        style = _style_flip(obs, action, reward, term, trunc, info)
+        return _apply_style(base, style)
+
     components = [
         RewardComponent(name="base", fn=_base_reward),
         RewardComponent(name="jumpy", fn=jumpy),
-        RewardComponent(name="low_slung", fn=low_slung),
-        RewardComponent(name="front_leg_pref", fn=front_leg_pref),
-        RewardComponent(name="left_leg_pref", fn=left_leg_pref),
-        RewardComponent(name="energy_efficient", fn=energy_efficient),
+        RewardComponent(name="shake", fn=shake),
+        RewardComponent(name="stilt", fn=stilt),
+        RewardComponent(name="flip", fn=flip),
     ]
 
     return RewardConfig(env_id=env_id, components=components)

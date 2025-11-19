@@ -8,7 +8,7 @@ from moppo.envs.reward_config import RewardComponent, RewardConfig
 
 def build_config(
     env_id: str,
-    style_percentage: float = 0.2,  # e.g. 0.2 ⇒ style can add/subtract up to ~20% of |base|
+    style_percentage: float = 1,  # e.g. 0.2 ⇒ style can add/subtract up to ~20% of |base|
 ) -> RewardConfig:
     if env_id != "HalfCheetah-v4":
         raise ValueError("This config is tailored for HalfCheetah-v4.")
@@ -80,6 +80,51 @@ def build_config(
         back_use = float(np.mean(np.abs(back)))
         total = front_use + back_use + eps
         return (back_use - front_use) / total
+    
+    def _style_wheel_mode(obs, action, reward, term, trunc, info):
+        """
+        Wheel mode:
+        - Encourage large torso angular velocity (continuous flips)
+        - Slight preference for forward movement while flipping
+        - Stable spin is better than chaotic wobble
+        """
+
+        torso_ang_vel = float(obs[2])  # pitch angular velocity
+
+        # Encourage big rotation magnitude
+        spin_term = torso_ang_vel / 15.0     # tuned for cheetah typical limits
+
+        # Encourage forward velocity slightly (not required)
+        forward_v = float(info.get("x_velocity", 0.0))
+        fwd_term = forward_v / 5.0
+
+        # Blend: mostly spin
+        style_raw = 0.8 * spin_term + 0.2 * fwd_term
+
+        return float(np.tanh(style_raw))
+    
+    def _style_chaos(obs, action, reward, term, trunc, info):
+        """
+        Chaos mode:
+        - Reward large joint velocities
+        - Reward rapid oscillation in hip/knee joints
+        - Add some torso pitching chaos
+        """
+
+        # Joint velocities ~ obs[8:]
+        joint_vels = np.asarray(obs[8:], dtype=np.float32)
+        joint_speed = float(np.mean(np.abs(joint_vels)))
+
+        # Torso chaos: large pitch velocity
+        torso_ang_vel = abs(float(obs[2]))
+
+        # Combine into a chaos score
+        chaos_raw = (
+            0.75 * (joint_speed / 10.0) +      # big joint movement
+            0.25 * (torso_ang_vel / 10.0)      # torso chaos
+        )
+
+        return float(np.tanh(chaos_raw))
 
     # --- Final reward components: base + percentage * style ----------------------
 
@@ -108,13 +153,22 @@ def build_config(
         style = _style_back_leg(obs, action, reward, term, trunc, info)
         return _apply_style(base, style)
 
+    def wheel_mode(obs, action, reward, term, trunc, info):
+        base = _base_reward(obs, action, reward, term, trunc, info)
+        style = _style_wheel_mode(obs, action, reward, term, trunc, info)
+        return _apply_style(base, style)
+
+    def chaos(obs, action, reward, term, trunc, info):
+        base = _base_reward(obs, action, reward, term, trunc, info)
+        style = _style_chaos(obs, action, reward, term, trunc, info)
+        return _apply_style(base, style)
+
     components = [
         RewardComponent(name="base", fn=_base_reward),
-        RewardComponent(name="fast_forward", fn=fast_forward),
         RewardComponent(name="slow_cruise", fn=slow_cruise),
         RewardComponent(name="jumpy", fn=jumpy),
-        RewardComponent(name="front_leg_pref", fn=front_leg_pref),
-        RewardComponent(name="back_leg_pref", fn=back_leg_pref),
+        RewardComponent(name="wheel_mode", fn=wheel_mode),
+        RewardComponent(name="chaos", fn=chaos),
     ]
 
     return RewardConfig(env_id=env_id, components=components)

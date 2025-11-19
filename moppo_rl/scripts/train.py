@@ -48,7 +48,7 @@ METRIC_DESCRIPTIONS = {
     "clip_frac": "Fraction of samples where the PPO ratio hit the clipping threshold.",
     "avg_return": "Mean episodic reward vector over the last 10 completed training episodes.",
     "eval_avg_return": "Average reward vector from clean deterministic evaluation rollouts.",
-    "pareto_hypervolume": "Reference-dominated hypervolume computed from sampled evaluation weights.",
+    "pareto_hypervolume": "Normalized reference-dominated hypervolume from the sampled Pareto sweep (0-1).",
 }
 
 
@@ -406,6 +406,7 @@ class MetricLogger:
 @dataclass
 class ParetoAnalysisResult:
     hypervolume: float
+    raw_hypervolume: float
     radar_path: Optional[Path]
     front_returns: np.ndarray
     all_returns: np.ndarray
@@ -530,6 +531,14 @@ def _hypervolume_recursive(points: np.ndarray) -> float:
     return volume
 
 
+def _hypervolume_bounds_volume(returns: np.ndarray, reference: np.ndarray) -> float:
+    if returns.size == 0:
+        return 0.0
+    spread = np.max(returns, axis=0) - reference
+    spread = np.maximum(spread, 0.0)
+    return float(np.prod(spread))
+
+
 def _plot_pareto_radar(front_points: np.ndarray, reward_names: Sequence[str], output_path: Path) -> Optional[Path]:
     if front_points.size == 0:
         return None
@@ -590,7 +599,11 @@ def _run_pareto_analysis(
     front_mask = _pareto_front_mask(return_matrix)
     front_points = return_matrix[front_mask]
     reference = _compute_reference_point(args.pareto_reference_point, return_matrix)
-    hypervolume = _hypervolume_from_points(front_points, reference)
+    hypervolume_raw = _hypervolume_from_points(front_points, reference)
+    bounds_volume = _hypervolume_bounds_volume(return_matrix, reference)
+    hypervolume = 0.0
+    if bounds_volume > 0.0:
+        hypervolume = float(np.clip(hypervolume_raw / bounds_volume, 0.0, 1.0))
     plot_name = f"update_{update_index:05d}_radar.png"
     radar_path = _plot_pareto_radar(front_points, reward_config.names, pareto_plot_dir / plot_name)
     if args.pareto_log_json:
@@ -598,6 +611,8 @@ def _run_pareto_analysis(
         payload = {
             "update": update_index,
             "hypervolume": float(hypervolume),
+            "hypervolume_raw": float(hypervolume_raw),
+            "hypervolume_bounds_volume": float(bounds_volume),
             "reference_point": reference.tolist(),
             "weights": weight_matrix.tolist(),
             "average_returns": return_matrix.tolist(),
@@ -607,6 +622,7 @@ def _run_pareto_analysis(
             json.dump(payload, handle, indent=2)
     return ParetoAnalysisResult(
         hypervolume=float(hypervolume),
+        raw_hypervolume=float(hypervolume_raw),
         radar_path=radar_path,
         front_returns=front_points,
         all_returns=return_matrix,
@@ -817,8 +833,8 @@ def train(args: TrainConfig) -> None:
     tensorboard_log_dir = _resolve_path(args.tensorboard_log_dir, workspace_dir)
     checkpoint_path = artifact_dir / "checkpoint.pt"
     if tensorboard_log_dir is None:
-        tensorboard_log_dir = run_dir / "tensorboard"
-    tensorboard_video_root = run_dir / "tensorboard_eval_videos"
+        tensorboard_log_dir = artifact_dir / "tensorboard"
+    tensorboard_video_root = artifact_dir / "tensorboard_eval_videos"
     pareto_plot_dir = (
         _resolve_path(args.pareto_plot_dir, workspace_dir) if args.pareto_plot_dir else artifact_dir / "pareto_eval"
     )
@@ -869,7 +885,7 @@ def train(args: TrainConfig) -> None:
         eval_render_mode = "video"
     eval_render_seconds = max(args.eval_render_seconds, 0.0)
 
-    metrics_logger = MetricLogger(run_dir=run_dir, env_id=args.env_id, reward_names=reward_config.names)
+    metrics_logger = MetricLogger(run_dir=artifact_dir, env_id=args.env_id, reward_names=reward_config.names)
     tensorboard_logger = TensorBoardLogger(
         log_dir=tensorboard_log_dir,
         reward_names=reward_config.names,
@@ -1040,7 +1056,9 @@ def train(args: TrainConfig) -> None:
                 )
                 if pareto_result is not None:
                     console.print(
-                        f"[magenta]Pareto hypervolume (update {update + 1}):[/magenta] {pareto_result.hypervolume:.4f}"
+                        "[magenta]Pareto hypervolume (update "
+                        f"{update + 1}):[/magenta] {pareto_result.hypervolume:.4f} "
+                        f"(raw {pareto_result.raw_hypervolume:.2e})"
                     )
                     if pareto_result.radar_path is not None:
                         console.print(f"[magenta]Saved radar plot to {pareto_result.radar_path}[/magenta]")

@@ -30,7 +30,7 @@ class MOPPOConfig:
     entropy_coef: float = 0.0
     value_coef: float = 1.0
     max_grad_norm: float = 0.5
-    hidden_sizes: Tuple[int, int] = (256, 256)
+    hidden_sizes: Tuple[int, int] = (512 , 512)
     device: str = "cpu"
     weight_strategy: str = "dirichlet"
     dirichlet_alpha: float = 1.0

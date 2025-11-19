@@ -93,6 +93,20 @@ def sanitize_name(name: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in name.lower())
 
 
+def pareto_front_mask(points: np.ndarray) -> np.ndarray:
+    """Boolean mask keeping only non-dominated points."""
+    if points.size == 0:
+        return np.zeros(points.shape[0], dtype=bool)
+    mask = np.ones(points.shape[0], dtype=bool)
+    for idx in range(points.shape[0]):
+        if not mask[idx]:
+            continue
+        dominates = np.all(points >= points[idx], axis=1) & np.any(points > points[idx], axis=1)
+        dominates[idx] = False
+        mask[dominates] = False
+    return mask
+
+
 def plot_pair(
     name_i: str,
     name_j: str,
@@ -109,9 +123,40 @@ def plot_pair(
 
     fig, ax = plt.subplots(figsize=(6, 5), dpi=150)
     color_values = weights[:, 0]
-    scatter = ax.scatter(x, y, c=color_values, cmap="viridis", s=60, edgecolors="k", linewidths=0.4)
+    scatter = ax.scatter(
+        x,
+        y,
+        c=color_values,
+        cmap="viridis",
+        s=50,
+        edgecolors="none",
+        linewidths=0.0,
+        alpha=0.35,
+        label="Sampled returns",
+    )
     cbar = fig.colorbar(scatter, ax=ax)
-    cbar.set_label(f"Weight on {name_i}")
+    cbar.set_label(f"Weight on {name_i}", rotation=270, labelpad=14)
+
+    mask = pareto_front_mask(returns)
+    front = returns[mask]
+    if front.size > 0:
+        order = np.argsort(front[:, 0])
+        front = front[order]
+        ax.plot(
+            front[:, 0],
+            front[:, 1],
+            color="crimson",
+            linewidth=2.2,
+            label="Pareto front",
+        )
+        ax.scatter(
+            front[:, 0],
+            front[:, 1],
+            color="crimson",
+            s=32,
+            edgecolors="white",
+            linewidths=0.4,
+        )
 
     ax.scatter(
         float(equal_return[0]),

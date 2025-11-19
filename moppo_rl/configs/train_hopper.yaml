@@ -19,7 +19,7 @@ dirichlet_alpha: 1.0
 weight_strategy: dirichlet
 seed: 7
 device: cpu
-eval_interval: 10
+eval_interval: 50
 eval_episodes: 2
 eval_weights:
 eval_render_dir:

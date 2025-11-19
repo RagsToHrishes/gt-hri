@@ -8,7 +8,7 @@ from moppo.envs.reward_config import RewardComponent, RewardConfig
 
 def build_config(
     env_id: str,
-    style_percentage: float = 0.2,  # fraction of |base reward| used for style shaping
+    style_percentage: float = 1,  # fraction of |base reward| used for style shaping
 ) -> RewardConfig:
     """
     Multi-objective reward config for Hopper-v4.
@@ -94,6 +94,17 @@ def build_config(
         ref_ctrl = 0.05  # reference control magnitude; tune if needed
         style_raw = (ref_ctrl - ctrl_norm) / max(ref_ctrl, eps)
         return float(np.tanh(style_raw))
+    
+    def _style_wobble(obs, action, reward, term, trunc, info):
+        torso_pitch = float(obs[1])
+        torso_pitch_vel = float(obs[2])
+
+        wobble_mag = abs(torso_pitch_vel) / 5.0
+        off_center = abs(torso_pitch) / 0.4
+
+        style_raw = 0.7 * wobble_mag + 0.3 * off_center
+        return float(np.tanh(style_raw))
+        
 
     # --- Final reward components: base + style -----------------------------------
 
@@ -121,6 +132,11 @@ def build_config(
         base = _base_reward(obs, action, reward, term, trunc, info)
         style = _style_energy_efficient(obs, action, reward, term, trunc, info)
         return _apply_style(base, style)
+    
+    def wobble(obs, action, reward, term, trunc, info):
+        base = _base_reward(obs, action, reward, term, trunc, info)
+        style = _style_wobble(obs, action, reward, term, trunc, info)
+        return _apply_style(base, style)
 
     components = [
         RewardComponent(name="base", fn=_base_reward),
@@ -128,7 +144,7 @@ def build_config(
         RewardComponent(name="upright", fn=upright),
         RewardComponent(name="crouch", fn=crouch),
         RewardComponent(name="fast_forward", fn=fast_forward),
-        RewardComponent(name="energy_efficient", fn=energy_efficient),
+        RewardComponent(name="wobble", fn=wobble),
     ]
         
     return RewardConfig(env_id=env_id, components=components)
